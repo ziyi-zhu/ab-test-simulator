@@ -1,0 +1,902 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>A/B Test Simulator</title>
+<meta name="description" content="Simulate an A/B test and read it with frequentist and Bayesian methods side by side.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%23141B27'/%3E%3Cpath d='M5 24c4 0 5-14 9-14s5 14 9 14' fill='none' stroke='%2386A0FF' stroke-width='2.5'/%3E%3Cpath d='M9 24c4 0 5-10 9-10s5 10 9 10' fill='none' stroke='%23E683CB' stroke-width='2.5'/%3E%3C/svg%3E">
+<script>try{const t=localStorage.getItem('theme');if(t)document.documentElement.dataset.theme=t;}catch(e){}</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root{
+  --bg:#EDF0F5; --surface:#FFFFFF; --sunk:#F5F7FA; --ink:#141B27; --muted:#5A6577; --line:#D6DCE5;
+  --freq:#2547C9; --freq-soft:rgba(37,71,201,.13);
+  --bayes:#A1307F; --bayes-soft:rgba(161,48,127,.13);
+  --prior:#B07208; --prior-soft:rgba(176,114,8,.14);
+  --good:#1C7A52; --bad:#BF3328; --warn:#946600;
+  --good-soft:rgba(28,122,82,.12); --bad-soft:rgba(191,51,40,.12); --warn-soft:rgba(148,102,0,.12);
+  --f-display:"IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+  --f-body:"IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+  --f-mono:"IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  --f-num:var(--f-body);
+  --r:12px;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#0E131B; --surface:#161D28; --sunk:#111821; --ink:#E5EAF2; --muted:#93A0B3; --line:#283241;
+  --freq:#86A0FF; --freq-soft:rgba(134,160,255,.16);
+  --bayes:#E683CB; --bayes-soft:rgba(230,131,203,.16);
+  --prior:#E8B04A; --prior-soft:rgba(232,176,74,.16);
+  --good:#4FC48D; --bad:#F2776C; --warn:#E3B341;
+  --good-soft:rgba(79,196,141,.14); --bad-soft:rgba(242,119,108,.14); --warn-soft:rgba(227,179,65,.14);
+  color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#0E131B; --surface:#161D28; --sunk:#111821; --ink:#E5EAF2; --muted:#93A0B3; --line:#283241;
+  --freq:#86A0FF; --freq-soft:rgba(134,160,255,.16);
+  --bayes:#E683CB; --bayes-soft:rgba(230,131,203,.16);
+  --prior:#E8B04A; --prior-soft:rgba(232,176,74,.16);
+  --good:#4FC48D; --bad:#F2776C; --warn:#E3B341;
+  --good-soft:rgba(79,196,141,.14); --bad-soft:rgba(242,119,108,.14); --warn-soft:rgba(227,179,65,.14);
+  color-scheme:dark}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.55 var(--f-body);font-variant-numeric:tabular-nums;-webkit-font-smoothing:antialiased;padding-inline:clamp(16px,3vw,36px);padding-block:20px 40px}
+.wrap{max-width:1320px;margin:0 auto}
+h1,h2,h3{font-family:var(--f-display);text-wrap:balance;margin:0;letter-spacing:-.01em}
+h1{font-size:24px;font-weight:600;line-height:1.2}
+h2{font-size:17px;font-weight:600}
+h3{font-size:14px;font-weight:600}
+p{margin:0}
+.mono,.num{font-family:var(--f-num);font-variant-numeric:tabular-nums}
+.eyebrow{font:500 12.5px/1.2 var(--f-body);color:var(--muted)}
+.f{color:var(--freq)} .b{color:var(--bayes)} .pr{color:var(--prior)}
+a{color:var(--freq)}
+button,input{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--freq);outline-offset:2px}
+
+/* header */
+.top{display:grid;grid-template-columns:minmax(0,1.4fr) minmax(0,1fr);gap:28px;align-items:end;margin-bottom:22px}
+.top .lead{color:var(--muted);max-width:70ch;margin-top:6px;font-size:14px}
+.top-r{display:flex;align-items:center;justify-content:flex-end;gap:16px}
+.tbtn{display:inline-grid;place-items:center;width:34px;height:34px;padding:0;border:1px solid var(--line);background:var(--surface);border-radius:8px;cursor:pointer;color:var(--muted)}
+.tbtn svg{width:17px;height:17px}
+.tbtn:hover{border-color:var(--muted);color:var(--ink)}
+.h1-split .f{display:inline}
+.legend{display:flex;flex-wrap:wrap;gap:8px 16px;justify-content:flex-end}
+.key{display:inline-flex;align-items:center;gap:7px;font-size:13px;color:var(--muted)}
+.key i{width:18px;height:4px;border-radius:2px;display:inline-block}
+
+/* presets */
+.presets{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:18px}
+.presets .eyebrow{margin-right:6px}
+.chip{border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:6px 13px;font-size:13px;cursor:pointer;transition:border-color .15s,background .15s}
+.chip:hover{border-color:var(--muted)}
+.chip[aria-pressed="true"]{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+
+.shell{display:grid;grid-template-columns:318px minmax(0,1fr);gap:20px;align-items:start}
+.panel{position:sticky;top:calc(env(safe-area-inset-top,0px) + 12px);max-height:calc(100vh - 24px);overflow:auto;background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:16px;display:flex;flex-direction:column;gap:18px}
+.grp{display:flex;flex-direction:column;gap:12px}
+.grp + .grp{border-top:1px solid var(--line);padding-top:16px}
+.grp > .eyebrow{display:flex;justify-content:space-between;align-items:center;font-weight:600;color:var(--ink);font-size:13px}
+.ctl{display:flex;flex-direction:column;gap:4px}
+.ctl label,.ctl .lbl{display:flex;justify-content:space-between;gap:8px;font-size:13px}
+.ctl output{font:500 13px var(--f-num);font-variant-numeric:tabular-nums}
+.ctl small{color:var(--muted);font-size:12px;line-height:1.4}
+input[type=range]{width:100%;accent-color:var(--freq);margin:2px 0}
+.bayesgrp input[type=range]{accent-color:var(--bayes)}
+.priorctl input[type=range]{accent-color:var(--prior)}
+.seg{display:grid;grid-auto-flow:column;grid-auto-columns:1fr;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.seg button{border:0;background:var(--sunk);padding:7px 4px;font-size:12.5px;cursor:pointer;border-right:1px solid var(--line)}
+.seg button:last-child{border-right:0}
+.seg button[aria-pressed="true"]{background:var(--ink);color:var(--bg);font-weight:600}
+.seg.metricseg{grid-auto-flow:row;grid-template-columns:1fr 1fr}
+.seg.metricseg button:nth-child(2n){border-right:0}
+.seg.metricseg button:nth-child(-n+2){border-bottom:1px solid var(--line)}
+.sw{display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:13px;cursor:pointer}
+.sw input{appearance:none;width:34px;height:20px;border-radius:999px;background:var(--line);position:relative;cursor:pointer;flex:none;transition:background .15s}
+.sw input::after{content:"";position:absolute;top:3px;left:3px;width:14px;height:14px;border-radius:50%;background:var(--surface);transition:transform .15s}
+.sw input:checked{background:var(--freq)}
+.bayesgrp .sw input:checked{background:var(--prior)}
+.sw input:checked::after{transform:translateX(14px)}
+.sw input:disabled{opacity:.4}
+.mini-chips{display:flex;flex-wrap:wrap;gap:6px}
+.mini-chips button{border:1px solid var(--line);background:var(--sunk);border-radius:6px;font-size:12px;padding:4px 8px;cursor:pointer}
+.mini-chips button:hover{border-color:var(--prior)}
+.mini-chips button[aria-pressed="true"]{background:var(--prior);border-color:var(--prior);color:var(--surface);font-weight:600}
+.btn{border:1px solid var(--ink);background:var(--ink);color:var(--bg);border-radius:8px;padding:8px 12px;font-weight:600;cursor:pointer;font-size:13px}
+.btn.ghost{background:transparent;color:var(--ink)}
+.dim{opacity:.45;pointer-events:none}
+
+/* main */
+main{display:flex;flex-direction:column;gap:20px;min-width:0}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:20px;min-width:0;box-shadow:0 1px 2px rgba(16,24,40,.04)}
+.card-head{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:baseline;gap:6px 16px;margin-bottom:6px}
+.card .sub{color:var(--muted);font-size:14px;max-width:72ch;margin-bottom:14px}
+
+.strip{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:1px;background:var(--line);border:1px solid var(--line);border-radius:var(--r);overflow:hidden}
+.strip > div{background:var(--surface);padding:10px 14px;min-width:0}
+.strip .eyebrow{font-size:12px}
+.strip .v{font:500 17px var(--f-num);font-variant-numeric:tabular-nums;margin-top:4px}
+
+.verdicts{display:grid;grid-template-columns:1fr 1fr;gap:20px}
+.vcard{position:relative;overflow:hidden}
+.vcard::before{content:"";position:absolute;inset:0 auto 0 0;width:4px}
+.vcard.fq::before{background:var(--freq)} .vcard.by::before{background:var(--bayes)}
+.vtop{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:10px}
+.vtop h2{font-size:19px}
+.pill{font:600 12.5px var(--f-num);padding:4px 10px;border-radius:999px;white-space:nowrap}
+.pill.ship{background:var(--good-soft);color:var(--good)}
+.pill.bad{background:var(--bad-soft);color:var(--bad)}
+.pill.wait{background:var(--warn-soft);color:var(--warn)}
+.big{font:700 clamp(30px,3.6vw,42px)/1 var(--f-display);font-variant-numeric:tabular-nums;letter-spacing:-.02em}
+.big small{font:500 13px var(--f-body);color:var(--muted);letter-spacing:0;margin-left:6px}
+.rows{display:grid;grid-template-columns:auto 1fr;gap:6px 14px;margin-top:14px;font-size:14px}
+.rows dt{color:var(--muted)} .rows dd{margin:0;text-align:right;font-family:var(--f-num);font-variant-numeric:tabular-nums}
+.say{margin-top:14px;padding-top:12px;border-top:1px dashed var(--line);font-size:13.5px;color:var(--muted)}
+.say b{color:var(--ink);font-weight:600}
+.meter{height:10px;border-radius:5px;background:var(--sunk);border:1px solid var(--line);position:relative;margin-top:10px;overflow:hidden}
+.meter i{position:absolute;inset:0 auto 0 0;background:var(--bayes);border-radius:5px 0 0 5px}
+.meter u{position:absolute;top:-2px;bottom:-2px;width:2px;background:var(--ink)}
+
+.chart{width:100%;min-height:120px}
+.chart svg{display:block;overflow:visible}
+.chart text{font:11px var(--f-num);fill:var(--muted)}
+.chart .lab{font:600 11px var(--f-body)}
+.gridl{stroke:var(--line);stroke-width:1}
+.zero{stroke:var(--muted);stroke-width:1;stroke-dasharray:2 3}
+.leg{display:flex;flex-wrap:wrap;gap:6px 16px;margin-top:10px;font-size:12.5px;color:var(--muted)}
+.leg span{display:inline-flex;align-items:center;gap:6px}
+.leg i{width:16px;height:3px;display:inline-block;border-radius:2px}
+.leg i.dash{background:repeating-linear-gradient(90deg,currentColor 0 4px,transparent 4px 7px)!important;height:2px}
+.note{margin-top:12px;font-size:14px;max-width:78ch}
+.note b{font-weight:600}
+.tri{display:grid;grid-template-columns:1.3fr 1fr 1fr;gap:16px}
+.tri > div{min-width:0}
+.tri h3{margin-bottom:4px}
+.tri .cap{font-size:12.5px;color:var(--muted);margin-bottom:6px}
+
+/* pulse-style scorecard */
+.pulse{border:1px solid var(--line);border-radius:8px;background:var(--sunk);padding:12px 14px}
+.pcap{display:flex;justify-content:space-between;gap:8px;font:500 12px var(--f-num);color:var(--muted);padding-bottom:8px;border-bottom:1px solid var(--line);margin-bottom:10px}
+.pcap span:last-child{white-space:nowrap}
+.prow{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:2px 12px;align-items:baseline}
+.pname{font-weight:600;font-size:14px;min-width:0}
+.pname small{display:block;color:var(--muted);font-weight:400;font-size:12px}
+.pdelta{font:600 20px var(--f-num);font-variant-numeric:tabular-nums;text-align:right;white-space:nowrap}
+.pdelta small{display:block;font-size:12px;color:var(--muted);font-weight:500}
+.pbar{position:relative;height:24px;margin-top:10px}
+.pbar .ax{position:absolute;left:0;right:0;top:11px;height:1px;background:var(--line)}
+.pbar .z{position:absolute;top:0;bottom:0;width:1px;background:var(--muted)}
+.pbar .ci{position:absolute;top:6px;height:12px;border-radius:3px;opacity:.85}
+.pbar .wing{position:absolute;top:11px;height:0;border-top:2px dashed}
+.pbar .cap{position:absolute;top:4px;height:16px;width:2px}
+.pbar .dot{position:absolute;top:7px;width:10px;height:10px;border-radius:50%;transform:translateX(-50%);background:var(--surface);border:2px solid}
+.pticks{position:relative;height:14px;font:10.5px var(--f-num);color:var(--muted);margin-top:2px}
+.pticks span{position:absolute;transform:translateX(-50%);white-space:nowrap}
+.pfoot{display:flex;flex-wrap:wrap;gap:4px 14px;font-size:12px;color:var(--muted);margin-top:10px}
+.pfoot b{font:500 12px var(--f-num);color:var(--ink)}
+.pstats{display:grid;grid-template-columns:1fr 1fr;gap:1px;background:var(--line);border:1px solid var(--line);border-radius:6px;overflow:hidden;margin-top:10px}
+.pstats div{background:var(--surface);padding:7px 10px}
+.pstats .v{font:600 16px var(--f-num);font-variant-numeric:tabular-nums}
+#readDay{accent-color:var(--ink);margin-top:6px}
+.early{font:600 11px var(--f-num);color:var(--warn);background:var(--warn-soft);padding:2px 6px;border-radius:4px;margin-left:6px}
+
+/* monte carlo */
+.mc{width:100%;border-collapse:collapse;font-size:13.5px}
+.mcwrap{overflow-x:auto}
+.mc th{font:500 12px var(--f-num);color:var(--muted);text-align:left;padding:8px 10px;border-bottom:1px solid var(--line);white-space:nowrap}
+.mc td{padding:10px;border-bottom:1px solid var(--line);vertical-align:middle}
+.mc td.m{min-width:190px}
+.mc td.m b{display:block;font-weight:600}
+.mc td.m small{color:var(--muted);font-size:12px}
+.bar{position:relative;height:22px;background:var(--sunk);border-radius:5px;min-width:150px;overflow:hidden}
+.bar i{position:absolute;inset:0 auto 0 0;border-radius:5px}
+.bar span{position:absolute;right:7px;top:50%;transform:translateY(-50%);font:500 12px var(--f-num);font-variant-numeric:tabular-nums}
+.bar u{position:absolute;top:0;bottom:0;width:2px;background:var(--ink);opacity:.6}
+.tag{font:600 11px var(--f-num);padding:2px 6px;border-radius:4px}
+.tag.f{background:var(--freq-soft)} .tag.b{background:var(--bayes-soft)}
+.mcfoot{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between;margin-top:12px;font-size:13px;color:var(--muted)}
+
+/* method notes */
+.engine{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
+.box{background:var(--sunk);border:1px solid var(--line);border-radius:8px;padding:14px;min-width:0}
+.box h3{margin-bottom:6px}
+.box p,.box li{font-size:13.5px;color:var(--ink)}
+.box ul{margin:6px 0 0;padding-left:18px;display:flex;flex-direction:column;gap:4px}
+.fx{font:12.5px/1.6 var(--f-mono);background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:10px 12px;margin-top:8px;overflow-x:auto;white-space:pre}
+.cmp{width:100%;border-collapse:collapse;font-size:14px}
+.cmpwrap{overflow-x:auto}
+.cmp th,.cmp td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+.cmp th{font:600 13px var(--f-num)}
+.cmp td:first-child{color:var(--muted);width:20%;font-size:13px}
+.warnline{font-size:13px;color:var(--warn);background:var(--warn-soft);padding:8px 12px;border-radius:8px;margin-bottom:12px}
+footer{margin-top:8px;font-size:13px;color:var(--muted);display:flex;flex-direction:column;gap:6px}
+.credit{border-top:1px solid var(--line);padding-top:12px;margin-top:6px}
+footer ul{margin:0;padding-left:18px}
+
+@media (max-width:1100px){.tri{grid-template-columns:1fr}}
+@media (max-width:900px){
+  .top{position:relative;gap:14px}.top h1{padding-right:46px}
+  .top-r{justify-content:flex-start}#theme{position:absolute;top:0;right:0}
+  .presets{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;margin-inline:calc(-1*clamp(16px,3vw,36px));padding-inline:clamp(16px,3vw,36px)}
+  .presets .chip,.presets .eyebrow{flex:none}
+  .shell{grid-template-columns:1fr}
+  .panel{position:static;max-height:none}
+  .top{grid-template-columns:1fr}.legend{justify-content:flex-start}
+  .verdicts,.engine{grid-template-columns:1fr}
+  .strip{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="top">
+  <div>
+    <h1>A/B Test Simulator</h1>
+    <p class="lead">Simulate an experiment and read the same data two ways: <span class="f">frequentist</span> (z-test, CI, optional mSPRT) and <span class="b">Bayesian</span> (normal prior on relative lift, chance to beat, expected loss).</p>
+  </div>
+  <div class="top-r">
+  <div class="legend" aria-label="Colour key">
+    <span class="key"><i style="background:var(--freq)"></i>Frequentist</span>
+    <span class="key"><i style="background:var(--bayes)"></i>Bayesian posterior</span>
+    <span class="key"><i style="background:var(--prior)"></i>Prior</span>
+  </div>
+  <button class="tbtn" id="theme" type="button" aria-label="Theme: auto" title="Theme: auto"></button>
+  </div>
+</header>
+
+<nav class="presets" aria-label="Scenarios">
+  <span class="eyebrow">Presets</span>
+  <button class="chip" data-preset="default">Default</button>
+  <button class="chip" data-preset="aa">A/A test</button>
+  <button class="chip" data-preset="clear">Clear win</button>
+  <button class="chip" data-preset="under">Underpowered</button>
+  <button class="chip" data-preset="wish">Wishful prior</button>
+  <button class="chip" data-preset="rev">Revenue outliers</button>
+  <button class="chip" data-preset="ret">Retention trap</button>
+  <button class="chip" data-preset="peek">Peeking temptation</button>
+</nav>
+
+<div class="shell">
+<aside class="panel" aria-label="Controls">
+  <div class="grp">
+    <div class="eyebrow">Experiment <button class="btn ghost" id="rerun" style="padding:4px 9px;font-size:12px">Re-roll data</button></div>
+    <div class="ctl"><span class="lbl">Metric type</span>
+      <div class="seg metricseg" id="metricSeg">
+        <button data-metric="conversion">Conversion</button>
+        <button data-metric="revenue">Revenue / user</button>
+        <button data-metric="retention">D-N retention</button>
+        <button data-metric="ratio">Clicks / session</button>
+      </div>
+    </div>
+    <div class="ctl"><label for="base"><span id="baseLbl">Control baseline</span><output id="baseOut"></output></label><input type="range" id="base"></div>
+    <div class="ctl"><label for="lift">True relative lift<output id="liftOut"></output></label><input type="range" id="lift" min="-10" max="10" step="0.1"><small>The real effect hidden in the simulation. Neither method sees it.</small></div>
+    <div class="ctl"><label for="users">Users per group<output id="usersOut"></output></label><input type="range" id="users" min="0" max="100" step="1"></div>
+    <div class="ctl"><label for="days">Planned duration<output id="daysOut"></output></label><input type="range" id="days" min="7" max="42" step="1"></div>
+    <div class="ctl"><span class="lbl">Significance level α</span>
+      <div class="seg" id="alphaSeg"><button data-alpha="0.01">0.01</button><button data-alpha="0.05">0.05</button><button data-alpha="0.1">0.10</button></div>
+    </div>
+    <div id="retGroup" class="grp" style="border:0;padding:0">
+      <div class="ctl"><label for="retW">Retention period end<output id="retWOut"></output></label><input type="range" id="retW" min="1" max="14" step="1"></div>
+      <div class="ctl"><label for="retL">Lookback window<output id="retLOut"></output></label><input type="range" id="retL" min="1" max="7" step="1"><small id="retWinTxt"></small></div>
+      <label class="sw" for="mature">Let cohorts mature after end<input type="checkbox" id="mature"></label>
+    </div>
+  </div>
+
+  <div class="grp">
+    <div class="eyebrow">Variance &amp; corrections</div>
+    <label class="sw" for="cuped">CUPED (7-day pre-period)<input type="checkbox" id="cuped"></label>
+    <div class="ctl" id="rhoCtl"><label for="rho">Pre/post correlation ρ<output id="rhoOut"></output></label><input type="range" id="rho" min="0" max="0.9" step="0.05"><small id="rhoTxt"></small></div>
+    <label class="sw" for="winsor" id="winsorRow">Winsorize at p99.9<input type="checkbox" id="winsor"></label>
+    <label class="sw" for="seq">Sequential testing (mSPRT)<input type="checkbox" id="seq"></label>
+  </div>
+
+  <div class="grp bayesgrp">
+    <div class="eyebrow">Bayesian prior on relative lift</div>
+    <label class="sw" for="priorOn">Use informative prior<input type="checkbox" id="priorOn"></label>
+    <div class="priorctl grp" id="priorCtls" style="border:0;padding:0;gap:12px">
+      <div class="ctl"><label for="priorMean">Prior mean<output id="priorMeanOut"></output></label><input type="range" id="priorMean" min="-5" max="5" step="0.1"></div>
+      <div class="ctl"><label for="priorSd">Prior std. error<output id="priorSdOut"></output></label><input type="range" id="priorSd" min="0" max="100" step="1"></div>
+    </div>
+    <div class="mini-chips" id="priorChips">
+      <button data-prior="0,0.5">Very skeptical</button>
+      <button data-prior="0,2">Skeptical</button>
+      <button data-prior="3,1">Optimistic</button>
+      <button data-prior="-2,1">Pessimistic</button>
+    </div>
+    <small id="flatTxt" style="color:var(--muted);font-size:12px">Off: N(0, ∞), the flat prior Statsig uses when none is set. Its infinite variance gives the prior zero weight, so the posterior equals the data's likelihood and results match the frequentist CI.</small>
+    <div class="ctl"><label for="thr">Ship if chance to beat ≥<output id="thrOut"></output></label><input type="range" id="thr" min="80" max="99.5" step="0.5"></div>
+    <div class="ctl"><label for="tol">…and expected loss ≤<output id="tolOut"></output></label><input type="range" id="tol" min="0.02" max="1" step="0.02"></div>
+  </div>
+</aside>
+
+<main>
+  <div id="warn" class="warnline" hidden></div>
+  <div class="strip" aria-label="Experiment snapshot">
+    <div><div class="eyebrow">Control mean</div><div class="v" id="sC"></div></div>
+    <div><div class="eyebrow">Test mean</div><div class="v" id="sT"></div></div>
+    <div><div class="eyebrow">Units analysed / group</div><div class="v" id="sN"></div></div>
+    <div><div class="eyebrow">Read on day</div><div class="v" id="sD"></div><input type="range" id="readDay" aria-label="Day of the read" min="1" max="14" step="1"></div>
+  </div>
+
+  <section class="verdicts" aria-label="Final results">
+    <article class="card vcard fq">
+      <div class="vtop"><h2 class="f">Frequentist</h2><span class="pill" id="fPill"></span></div>
+      <div id="fPulse"></div>
+      <dl class="rows" id="fRows"></dl>
+      <p class="say" id="fSay"></p>
+    </article>
+    <article class="card vcard by">
+      <div class="vtop"><h2 class="b">Bayesian</h2><span class="pill" id="bPill"></span></div>
+      <div id="bPulse"></div>
+      <dl class="rows" id="bRows"></dl>
+      <p class="say" id="bSay"></p>
+    </article>
+  </section>
+
+  <section class="card">
+    <div class="card-head"><h2>Prior × likelihood = posterior</h2><span class="eyebrow" id="distEye">Relative lift, final read</span></div>
+    <p class="sub">The likelihood is what the data say on their own: a normal curve centred on the observed lift, with the delta-method standard error. The posterior is a precision-weighted blend of prior and likelihood. The shaded tail is the posterior probability that test is worse than control.</p>
+    <div class="chart" id="distChart"></div>
+    <div class="leg">
+      <span><i style="background:var(--prior)"></i>Prior</span>
+      <span><i class="dash" style="color:var(--freq)"></i>Likelihood (data only)</span>
+      <span><i style="background:var(--bayes)"></i>Posterior</span>
+      <span><i style="background:var(--bad-soft);height:10px"></i>P(test &lt; control)</span>
+      <span style="display:inline">Bars below axis: <b class="f">CI</b>, <b class="f">Seq CI</b>, <b class="b">credible interval</b></span>
+    </div>
+    <p class="note" id="distNote"></p>
+  </section>
+
+  <section class="card">
+    <div class="card-head"><h2>Prior sensitivity</h2><span class="eyebrow">Same data, every prior width</span></div>
+    <p class="sub">Holding the data fixed, this sweeps the prior's standard error from very tight to very loose. A tight prior drags the estimate to the prior mean. A loose prior lets the data speak, and the Bayesian answer converges to the frequentist one.</p>
+    <div class="chart" id="shrinkChart"></div>
+    <div class="leg">
+      <span><i style="background:var(--bayes)"></i>Posterior mean (band = credible interval)</span>
+      <span><i class="dash" style="color:var(--freq)"></i>Observed lift</span>
+      <span><i class="dash" style="color:var(--prior)"></i>Prior mean</span>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="card-head"><h2>Daily reads</h2><span class="eyebrow">Cumulative reads of one run</span></div>
+    <p class="sub">Real dashboards update daily, and people look. Early intervals are wide and estimates swing. A plain p-value can dip under α by chance; the sequential interval stays wide until enough data has arrived.</p>
+    <div class="tri">
+      <div><h3>Lift estimate and intervals</h3><p class="cap">Band: fixed CI. Dashed: sequential CI. Plum lines: credible interval.</p><div class="chart" id="tChart"></div></div>
+      <div><h3>p-value</h3><p class="cap">Solid: fixed-horizon. Dashed: sequential p*. Red: α.</p><div class="chart" id="pChart"></div></div>
+      <div><h3>Chance to beat</h3><p class="cap">Lines mark your ship and regression thresholds.</p><div class="chart" id="cChart"></div></div>
+    </div>
+    <p class="note" id="peekNote"></p>
+  </section>
+
+  <section class="card">
+    <div class="card-head"><h2>Monte Carlo</h2><span class="eyebrow">2,000 runs · current settings</span></div>
+    <p class="sub">One run is an anecdote. Here the same design is repeated 2,000 times with no true effect (A/A) and 2,000 times with your true lift. A good procedure makes few calls in the A/A world and many correct calls in the A/B world. The black tick marks α.</p>
+    <div class="mcwrap"><table class="mc" id="mcTable"></table></div>
+    <div class="mcfoot"><span id="mcMeta">Running…</span><span>Bayesian rows use the chance-to-beat rule only (both tails), so they're comparable with two-sided tests.</span></div>
+  </section>
+
+  <section class="card">
+    <div class="card-head"><h2>Method notes</h2><span class="eyebrow" id="engEyebrow"></span></div>
+    <div class="engine" id="engine"></div>
+  </section>
+
+  <section class="card">
+    <div class="card-head"><h2>Comparison</h2></div>
+    <div class="cmpwrap"><table class="cmp">
+      <thead><tr><th></th><th class="f">Frequentist (Statsig default)</th><th class="b">Bayesian</th></tr></thead>
+      <tbody>
+        <tr><td>Question answered</td><td>If there were no effect, how surprising is this data?</td><td>Given my prior and this data, how likely is test better, and how much do I lose if I'm wrong?</td></tr>
+        <tr><td>Headline output</td><td>Relative delta, 95% CI (±1.96·SE), p-value from a two-sided z-test</td><td>Posterior mean, credible interval, chance to beat P(Δ&gt;0), expected loss E[Δ | Δ&lt;0]·P(Δ&lt;0)</td></tr>
+        <tr><td>Prior</td><td>None</td><td>Normal prior on relative ATE. Flat N(0,∞) by default; informed priors usually come from past experiments' average effect and standard error</td></tr>
+        <tr><td>Looking early</td><td>Inflates false positives unless you use sequential testing (mSPRT widens intervals until the planned end)</td><td>The posterior is always "valid" as a belief, but a ship rule applied daily still makes more false calls (see the Monte Carlo table)</td></tr>
+        <tr><td>With a flat prior</td><td colspan="2">The two agree numerically: credible interval = confidence interval, and chance to beat = 1 − p/2 for a positive effect. Differences come from the prior and from the decision rule.</td></tr>
+        <tr><td>Main risk</td><td>Misreading p as "probability the change works"; peeking; underpowered tests that exaggerate effects</td><td>A confident but wrong prior can ship a loser or bury a winner; results depend on a choice others must trust</td></tr>
+      </tbody>
+    </table></div>
+  </section>
+
+  <footer>
+    <span>Implementation details follow Statsig's public docs. The data are simulated with normal approximations to group means, so treat numbers as illustrative.</span>
+    <ul>
+      <li><a href="https://docs.statsig.com/experiments/advanced-setup/bayesian" target="_blank" rel="noopener">Statsig: Bayesian experiments (informed priors, posterior update)</a></li>
+      <li><a href="https://docs.statsig.com/experiments/advanced-setup/sequential-testing" target="_blank" rel="noopener">Statsig: Frequentist sequential testing (mSPRT)</a></li>
+      <li><a href="https://docs.statsig.com/statsig-warehouse-native/features/statistics/methodologies/delta-method" target="_blank" rel="noopener">Statsig: Delta method for ratio metrics</a></li>
+      <li><a href="https://docs.statsig.com/statsig-warehouse-native/metrics/retention" target="_blank" rel="noopener">Statsig: Retention metrics</a></li>
+      <li><a href="https://docs.statsig.com/experiments/statistical-methods/variance-reduction" target="_blank" rel="noopener">Statsig: Variance reduction (CUPED, winsorization)</a></li>
+      <li><a href="https://docs.statsig.com/stats-engine/metric-deltas" target="_blank" rel="noopener">Statsig: Metric deltas</a></li>
+    </ul>
+    <span class="credit">By <a href="https://github.com/ziyi-zhu">Ziyi Zhu</a> · <a href="https://github.com/ziyi-zhu/ab-test-simulator">Source</a></span>
+  </footer>
+</main>
+</div>
+</div>
+
+<script>
+(()=>{
+// ---------- math ----------
+function erfc(x){const z=Math.abs(x),t=1/(1+0.5*z);const r=t*Math.exp(-z*z-1.26551223+t*(1.00002368+t*(0.37409196+t*(0.09678418+t*(-0.18628806+t*(0.27886807+t*(-1.13520398+t*(1.48851587+t*(-0.82215223+t*0.17087277)))))))));return x>=0?r:2-r;}
+const Phi=x=>0.5*erfc(-x/Math.SQRT2);
+const phi=x=>Math.exp(-x*x/2)/Math.sqrt(2*Math.PI);
+function invNorm(p){const a=[-39.6968302866538,220.946098424521,-275.928510446969,138.357751867269,-30.6647980661472,2.50662827745924],b=[-54.4760987982241,161.585836858041,-155.698979859887,66.8013118877197,-13.2806815528857],c=[-0.00778489400243029,-0.322396458041136,-2.40075827716184,-2.54973253934373,4.37466414146497,2.93816398269878],d=[0.00778469570904146,0.32246712907004,2.445134137143,3.75440866190742];const pl=0.02425;let q,r;if(p<pl){q=Math.sqrt(-2*Math.log(p));return(((((c[0]*q+c[1])*q+c[2])*q+c[3])*q+c[4])*q+c[5])/((((d[0]*q+d[1])*q+d[2])*q+d[3])*q+1);}if(p>1-pl){q=Math.sqrt(-2*Math.log(1-p));return-(((((c[0]*q+c[1])*q+c[2])*q+c[3])*q+c[4])*q+c[5])/((((d[0]*q+d[1])*q+d[2])*q+d[3])*q+1);}q=p-0.5;r=q*q;return(((((a[0]*r+a[1])*r+a[2])*r+a[3])*r+a[4])*r+a[5])*q/(((((b[0]*r+b[1])*r+b[2])*r+b[3])*r+b[4])*r+1);}
+function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;}}
+function gauss(r){let u=0;while(u===0)u=r();return Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*r());}
+
+// ---------- state ----------
+const BASES={conversion:{min:1,max:60,step:0.5,def:10},revenue:{min:0.5,max:50,step:0.1,def:2.5},retention:{min:5,max:80,step:0.5,def:35},ratio:{min:0.05,max:2,step:0.01,def:0.42}};
+const DEFAULT={metric:'conversion',base:{conversion:10,revenue:2.5,retention:35,ratio:0.42},lift:3,users:100000,days:14,alpha:0.05,cuped:false,rho:0.4,winsor:false,seq:false,retW:7,retL:7,mature:false,priorOn:true,priorMean:0,priorSd:2,thr:95,tol:0.2,seed:7,readDay:null};
+let S=JSON.parse(JSON.stringify(DEFAULT));
+const PRESETS={
+  default:{},
+  aa:{metric:'conversion',lift:0,users:50000,days:14,priorOn:false,seq:false,seed:21},
+  clear:{metric:'conversion',lift:4,users:200000,days:14,priorOn:true,priorMean:0,priorSd:2,seed:3},
+  under:{metric:'conversion',lift:2,users:20000,days:14,priorOn:true,priorMean:0,priorSd:1,seed:5},
+  wish:{metric:'conversion',lift:-2,users:30000,days:14,priorOn:true,priorMean:3,priorSd:1,seq:false,seed:9},
+  rev:{metric:'revenue',lift:5,users:100000,days:14,winsor:false,cuped:false,priorOn:false,seed:4},
+  ret:{metric:'retention',lift:-3,users:60000,days:14,retW:7,retL:7,mature:false,priorOn:false,seed:12},
+  peek:{metric:'conversion',lift:0,users:100000,days:28,priorOn:false,seq:false,seed:44}
+};
+
+const $=id=>document.getElementById(id);
+const pct=(x,d=2)=>(x>=0?'+':'−')+Math.abs(x*100).toFixed(d)+'%';
+const pctu=(x,d=1)=>(x*100).toFixed(d)+'%';
+const fmtN=n=>n>=1e6?(n/1e6).toFixed(n>=1e7?0:2)+'M':n>=1e4?Math.round(n/1e3)+'k':n>=1e3?(n/1e3).toFixed(1)+'k':Math.round(n).toLocaleString();
+const fmtP=p=>p<0.0001?'<0.0001':p.toFixed(4);
+const usersFromV=v=>{const n=Math.pow(10,3+3*v/100);const m=Math.pow(10,Math.floor(Math.log10(n))-1);return Math.round(n/m)*m;};
+const vFromUsers=n=>Math.round((Math.log10(n)-3)/3*100);
+const sdFromV=v=>Math.pow(10,-1+Math.log10(200)*v/100); // 0.1%..20%
+const vFromSd=s=>Math.round((Math.log10(s)+1)/Math.log10(200)*100);
+
+function fmtMean(m){
+  if(S.metric==='revenue')return '$'+m.toFixed(3);
+  if(S.metric==='ratio')return m.toFixed(4);
+  return (m*100).toFixed(2)+'%';
+}
+
+// ---------- metric model ----------
+function model(){
+  const b=S.base[S.metric], L=S.lift/100;
+  let mc,mt,vc,vt,lag=0,cv=null;
+  if(S.metric==='conversion'||S.metric==='retention'){
+    mc=b/100; mt=Math.min(0.999,Math.max(0.001,mc*(1+L))); vc=mc*(1-mc); vt=mt*(1-mt);
+    if(S.metric==='retention')lag=S.retW;
+  }else if(S.metric==='revenue'){
+    cv=S.winsor?3.0:8.0; mc=b*(S.winsor?0.93:1); mt=mc*(1+L); vc=(cv*mc)**2; vt=(cv*mt)**2;
+  }else{
+    cv=0.97; mc=b; mt=mc*(1+L); vc=(cv*mc)**2; vt=(cv*mt)**2;
+  }
+  const red=S.cuped?(1-S.rho*S.rho):1;
+  return {mc,mt,vc:vc*red,vt:vt*red,rawVc:vc,lag,cv,red};
+}
+function timeline(M){
+  const D=S.days, T=D+(M.lag&&S.mature?M.lag:0), upd=S.users/D;
+  const Nfinal=upd*Math.max(0,Math.min(D,T-M.lag));
+  return {D,T,upd,Nfinal};
+}
+function seqZ(n,M,Nfinal,za,a){
+  const V=(M.vt+M.vc)/n, tau=za*za*(M.vt+M.vc)/(2*Nfinal);
+  return Math.sqrt((V+tau)/tau*(-2*Math.log(a/2)-Math.log(V/(V+tau))));
+}
+function analyze(n,mc,mt,M,TL,final,za){
+  if(!(n>0)||mc<=0)return null;
+  const rel=mt/mc-1;
+  const se=Math.sqrt(M.vt/(n*mc*mc)+mt*mt*M.vc/(n*mc**4));
+  const z=rel/se, p=2*Phi(-Math.abs(z));
+  let zs=za, ps=p;
+  if(S.seq&&!final&&TL.Nfinal>0){zs=seqZ(n,M,TL.Nfinal,za,S.alpha);ps=2*Phi(-Math.abs(z)/(zs/za));}
+  let pm=rel,ps_=se,w=0;
+  if(S.priorOn){const p0=S.priorMean/100,s0=S.priorSd/100;const prec=1/(s0*s0)+1/(se*se);pm=(p0/(s0*s0)+rel/(se*se))/prec;ps_=Math.sqrt(1/prec);w=(1/(s0*s0))/prec;}
+  const ctb=Phi(pm/ps_);
+  const el=-(pm*Phi(-pm/ps_)-ps_*phi(pm/ps_));
+  return {n,mc,mt,rel,se,z,p,zs,ps,ci:[rel-za*se,rel+za*se],sci:[rel-zs*se,rel+zs*se],pm,psd:ps_,w,ctb,el,cred:[pm-za*ps_,pm+za*ps_]};
+}
+function runPath(M,TL,seed){
+  const r=mulberry32(seed), za=invNorm(1-S.alpha/2);
+  let n=0,sc=0,st=0;const out=[];
+  for(let d=1;d<=TL.T;d++){
+    const k=d-M.lag, inc=(k>=1&&k<=TL.D)?TL.upd:0;
+    if(inc>0){n+=inc;sc+=inc*M.mc+Math.sqrt(inc*M.vc)*gauss(r);st+=inc*M.mt+Math.sqrt(inc*M.vt)*gauss(r);}
+    out.push({d,a:n>0?analyze(n,sc/n,st/n,M,TL,d===TL.T,za):null});
+  }
+  return out;
+}
+
+// ---------- decisions ----------
+function fDecision(a,final){
+  const p=(S.seq&&!final)?a.ps:a.p;
+  if(p<S.alpha)return a.rel>0?['ship','Ship it']:['bad','Regression'];
+  return ['wait','Not significant'];
+}
+function bDecision(a){
+  const t=S.thr/100;
+  if(a.ctb>=t&&a.el*100<=S.tol)return ['ship','Ship it'];
+  if(a.ctb>=t)return ['wait','Likely win, loss too high'];
+  if(a.ctb<=1-t)return ['bad','Likely regression'];
+  return ['wait','Inconclusive'];
+}
+
+// ---------- svg helpers ----------
+function nice(lo,hi,count){
+  const span=hi-lo;if(!(span>0))return [lo];
+  const step0=span/count,mag=Math.pow(10,Math.floor(Math.log10(step0))),f=step0/mag;
+  const step=(f<1.5?1:f<3?2:f<7?5:10)*mag;const out=[];
+  for(let v=Math.ceil(lo/step)*step;v<=hi+1e-12;v+=step)out.push(+v.toFixed(12));
+  return out;
+}
+let clipId=0;
+function svgChart(el,o){
+  const W=Math.max(260,el.clientWidth||600),H=o.h||240,m={l:o.ml||46,r:o.mr||12,t:12,b:o.mb||28};
+  const iw=W-m.l-m.r,ih=H-m.t-m.b;
+  const lx=o.xlog?Math.log10:v=>v, ly=o.ylog?Math.log10:v=>v;
+  const xs=v=>m.l+(lx(v)-lx(o.x0))/(lx(o.x1)-lx(o.x0))*iw;
+  const ys=v=>m.t+ih-(ly(Math.min(Math.max(v,o.y0),o.y1))-ly(o.y0))/(ly(o.y1)-ly(o.y0))*ih;
+  const yr=v=>m.t+ih-(ly(v)-ly(o.y0))/(ly(o.y1)-ly(o.y0))*ih;
+  const id='c'+(++clipId);
+  let s=`<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="${o.label}"><defs><clipPath id="${id}"><rect x="${m.l}" y="${m.t-2}" width="${iw}" height="${ih+4}"/></clipPath></defs>`;
+  for(const t of o.yticks){const y=yr(t);s+=`<line class="gridl" x1="${m.l}" x2="${m.l+iw}" y1="${y}" y2="${y}"/><text x="${m.l-6}" y="${y+3.5}" text-anchor="end">${o.yfmt(t)}</text>`;}
+  for(const t of o.xticks){const x=xs(t);s+=`<text x="${x}" y="${m.t+ih+16}" text-anchor="middle">${o.xfmt(t)}</text>`;}
+  s+=`<g clip-path="url(#${id})">${o.draw({xs,ys,m,iw,ih,W,H})}</g>`;
+  if(o.over)s+=o.over({xs,ys,m,iw,ih,W,H});
+  s+='</svg>';el.innerHTML=s;
+}
+const P=(pts,xs,ys)=>pts.map((p,i)=>(i?'L':'M')+xs(p[0]).toFixed(1)+','+ys(p[1]).toFixed(1)).join('');
+const band=(pts,xs,ys)=>{const top=pts.map((p,i)=>(i?'L':'M')+xs(p[0]).toFixed(1)+','+ys(p[2]).toFixed(1)).join('');const bot=pts.slice().reverse().map(p=>'L'+xs(p[0]).toFixed(1)+','+ys(p[1]).toFixed(1)).join('');return top+bot+'Z';};
+const npdf=(x,m,s)=>Math.exp(-0.5*((x-m)/s)**2)/(s*Math.sqrt(2*Math.PI));
+
+// ---------- render ----------
+let path=[],final=null,M=null,TL=null;
+function render(skipMC){
+  M=model();TL=timeline(M);
+  const warn=$('warn');
+  if(TL.Nfinal<=0){warn.hidden=false;warn.textContent=`No user has completed a ${S.retW}-day retention window within a ${S.days}-day experiment. Lengthen the experiment, shorten the retention period, or let cohorts mature after the end.`;}
+  else warn.hidden=true;
+  path=runPath(M,TL,S.seed);
+  const valid=path.filter(p=>p.a);
+  final=valid.length?(valid.find(p=>p.d===S.readDay)||valid[valid.length-1]):null;
+  const rdi=$('readDay');if(valid.length){rdi.min=valid[0].d;rdi.max=TL.T;rdi.value=final.d;rdi.disabled=valid.length<2;}
+  renderEngine();
+  if(!final){['fPulse','bPulse','sC','sT','sN','sD'].forEach(i=>$(i).textContent='—');['distChart','shrinkChart','tChart','pChart','cChart'].forEach(i=>$(i).innerHTML='');scheduleMC();return;}
+  const a=final.a, isFinal=final.d===TL.T;
+  $('sC').textContent=fmtMean(a.mc);$('sT').textContent=fmtMean(a.mt);$('sN').textContent=fmtN(a.n);
+  $('sD').innerHTML=`${final.d} of ${TL.T}`+(isFinal?'':'<span class="early">early</span>');
+  $('distEye').textContent=isFinal?'Relative lift, final read':`Relative lift, day ${final.d} read`;
+  const lvl=Math.round((1-S.alpha)*100);
+  const sc=Math.max(Math.abs(a.sci[0]),Math.abs(a.sci[1]),Math.abs(a.cred[0]),Math.abs(a.cred[1]),0.002)*1.12;
+  // frequentist card
+  const fd=fDecision(a,isFinal);
+  $('fPill').className='pill '+fd[0];$('fPill').textContent=fd[1];
+  const pUsed=(S.seq&&!isFinal)?a.ps:a.p;const fCol=pUsed<S.alpha?(a.rel>0?'var(--good)':'var(--bad)'):'var(--muted)';
+  const showW=S.seq&&!isFinal;
+  $('fPulse').innerHTML=pulse({lo:a.ci[0],hi:a.ci[1],wl:showW?a.sci[0]:null,wh:showW?a.sci[1]:null,est:a.rel,col:fCol,sc,half:(showW?a.zs:invNorm(1-S.alpha/2))*a.se,cap:`Frequentist · ${lvl}% CI`+(S.cuped?' · CUPED':'')+(showW?' · Sequential':''),a,stats:null});
+  $('fRows').innerHTML=`<dt>${lvl}% confidence interval</dt><dd>[${pct(a.ci[0])}, ${pct(a.ci[1])}]</dd>
+    <dt>z-statistic</dt><dd>${a.z.toFixed(2)}</dd><dt>p-value (two-sided)</dt><dd>${fmtP(a.p)}</dd>${showW?`<dt>Sequential p*</dt><dd>${fmtP(a.ps)}</dd><dt>Sequential ${lvl}% CI</dt><dd>[${pct(a.sci[0])}, ${pct(a.sci[1])}]</dd>`:''}
+    <dt>Standard error</dt><dd>${pctu(a.se,2)}</dd>
+    <dt>Variance multiplier</dt><dd>${M.red.toFixed(2)}×${S.cuped?' (CUPED)':''}</dd>`;
+  const sig=pUsed<S.alpha;
+  $('fSay').innerHTML=sig?`If test and control were truly identical, a difference this large would show up in only <b>${(a.p*100).toFixed(2)}%</b> of experiments. That clears α = ${S.alpha}, so the result is called ${a.rel>0?'a win':'a loss'}. It does not say how likely the change is to work.`
+    :`A result this extreme would happen <b>${(a.p*100).toFixed(1)}%</b> of the time with no real effect, which is above α = ${S.alpha}. The test cannot rule out zero; the interval still spans ${pct(a.ci[0])} to ${pct(a.ci[1])}.`;
+  // bayes card
+  const bd=bDecision(a);
+  $('bPill').className='pill '+bd[0];$('bPill').textContent=bd[1];
+  const bCol=a.ctb>=S.thr/100?'var(--good)':a.ctb<=1-S.thr/100?'var(--bad)':'var(--muted)';
+  $('bPulse').innerHTML=pulse({lo:a.cred[0],hi:a.cred[1],wl:null,wh:null,est:a.pm,col:bCol,sc,half:invNorm(1-S.alpha/2)*a.psd,cap:`Bayesian · ${lvl}% credible interval`+(S.priorOn?' · informed prior':''),a,stats:[['Chance to beat',(a.ctb*100).toFixed(1)+'%'],['Expected loss',(a.el*100).toFixed(3)+'%']]});
+  $('bRows').innerHTML=`<dt>Posterior mean lift</dt><dd>${pct(a.pm)}</dd>
+    <dt>${lvl}% credible interval</dt><dd>[${pct(a.cred[0])}, ${pct(a.cred[1])}]</dd>
+    <dt>Expected loss if shipped</dt><dd>${(a.el*100).toFixed(3)}%</dd>
+    <dt>Prior</dt><dd>${S.priorOn?`N(${pct(S.priorMean/100,1)}, ${(S.priorSd).toFixed(2)}%²)`:'flat N(0, ∞)'}</dd>
+    <dt>Weight on prior</dt><dd>${(a.w*100).toFixed(0)}%</dd>`;
+  $('bSay').innerHTML=`Given ${S.priorOn?'the prior and ':''}the data, there is a <b>${(a.ctb*100).toFixed(1)}%</b> probability that test is better. If you ship and you're wrong, you lose on average <b>${(a.el*100).toFixed(3)}%</b> of the metric (risk-weighted).`+(S.priorOn?'':` With a flat prior this equals 1 − p/2${a.rel<0?' for the opposite direction':''}.`);
+  drawDist(a);drawShrink(a);drawTime();if(!skipMC)scheduleMC();
+}
+function metricName(){
+  return {conversion:['Purchase conversion','event_user · one-time event'],revenue:['Revenue per user','sum · zeros imputed'+(S.winsor?' · winsorized':'')],retention:[`D${S.retW} retention`,`ratio · ${S.retL}-day lookback`],ratio:['Clicks per session','ratio · delta method']}[S.metric];
+}
+function pulse(o){
+  const pos=v=>Math.max(0,Math.min(100,50+v/o.sc*50));
+  const [nm,sub]=metricName();
+  let bar=`<div class="ax"></div><div class="z" style="left:50%"></div>`;
+  if(o.wl!=null){bar+=`<div class="wing" style="left:${pos(o.wl)}%;width:${pos(o.lo)-pos(o.wl)}%;border-color:${o.col}"></div><div class="wing" style="left:${pos(o.hi)}%;width:${pos(o.wh)-pos(o.hi)}%;border-color:${o.col}"></div><div class="cap" style="left:calc(${pos(o.wl)}% - 1px);background:${o.col}"></div><div class="cap" style="left:calc(${pos(o.wh)}% - 1px);background:${o.col}"></div>`;}
+  bar+=`<div class="ci" style="left:${pos(o.lo)}%;width:${Math.max(.5,pos(o.hi)-pos(o.lo))}%;background:${o.col}"></div><div class="dot" style="left:${pos(o.est)}%;border-color:${o.col}"></div>`;
+  const ticks=nice(-o.sc,o.sc,4).map(t=>`<span style="left:${pos(t)}%">${t===0?'0%':pct(t,Math.abs(o.sc)<0.02?1:0)}</span>`).join('');
+  const a=o.a;
+  let h=`<div class="pulse"><div class="pcap"><span>${o.cap}</span><span>Δ% vs control</span></div>
+    <div class="prow"><div class="pname">${nm}<small>${sub}</small></div><div class="pdelta" style="color:${o.col==='var(--muted)'?'var(--ink)':o.col}">${pct(o.est)}<small>± ${(o.half*100).toFixed(2)}%</small></div></div>
+    <div class="pbar" role="img" aria-label="Interval from ${pct(o.wl??o.lo)} to ${pct(o.wh??o.hi)}">${bar}</div><div class="pticks">${ticks}</div>`;
+  if(o.stats)h+=`<div class="pstats">${o.stats.map(s=>`<div><div class="eyebrow">${s[0]}</div><div class="v">${s[1]}</div></div>`).join('')}</div>`;
+  h+=`<div class="pfoot"><span>Control <b>${fmtMean(a.mc)}</b></span><span>Test <b>${fmtMean(a.mt)}</b></span><span>Units <b>${fmtN(a.n)}</b> / <b>${fmtN(a.n)}</b></span>${o.wl!=null?'<span>Dashed tails: sequential expansion</span>':''}</div></div>`;
+  return h;
+}
+
+function drawDist(a){
+  const el=$('distChart');
+  const p0=S.priorMean/100,s0=S.priorSd/100;
+  let lo=Math.min(a.rel-4*a.se,a.pm-4*a.psd,0,S.lift/100),hi=Math.max(a.rel+4*a.se,a.pm+4*a.psd,0,S.lift/100);
+  if(S.priorOn){lo=Math.min(lo,p0-2.5*s0);hi=Math.max(hi,p0+2.5*s0);}
+  if(S.seq&&a.zs>a.ci[1]){}
+  const pad=(hi-lo)*0.04;lo-=pad;hi+=pad;
+  const N=220,xsv=[...Array(N)].map((_,i)=>lo+(hi-lo)*i/(N-1));
+  const like=xsv.map(x=>[x,npdf(x,a.rel,a.se)]),post=xsv.map(x=>[x,npdf(x,a.pm,a.psd)]);
+  const prior=S.priorOn?xsv.map(x=>[x,npdf(x,p0,s0)]):null;
+  let ymax=Math.max(npdf(a.rel,a.rel,a.se),npdf(a.pm,a.pm,a.psd),S.priorOn?npdf(p0,p0,s0):0)*1.08;
+  const isFinal=final.d===TL.T;
+  const showSeq=S.seq&&!isFinal;
+  svgChart(el,{label:'Prior, likelihood and posterior for relative lift',h:300,mb:84,ml:46,x0:lo,x1:hi,y0:0,y1:ymax,xticks:nice(lo,hi,7),xfmt:v=>pct(v,1).replace('+0.0%','0%').replace('−0.0%','0%'),yticks:[],yfmt:()=>'',
+    draw:({xs,ys,m,ih})=>{
+      let s='';
+      const neg=post.filter(p=>p[0]<=0);
+      if(neg.length>1){s+=`<path d="${P(neg,xs,ys)}L${xs(neg[neg.length-1][0])},${ys(0)}L${xs(neg[0][0])},${ys(0)}Z" fill="var(--bad-soft)"/>`;}
+      if(prior)s+=`<path d="${P(prior,xs,ys)}L${xs(hi)},${ys(0)}L${xs(lo)},${ys(0)}Z" fill="var(--prior-soft)"/><path d="${P(prior,xs,ys)}" fill="none" stroke="var(--prior)" stroke-width="2"/>`;
+      s+=`<path d="${P(like,xs,ys)}" fill="none" stroke="var(--freq)" stroke-width="2" stroke-dasharray="5 4"/>`;
+      s+=`<path d="${P(post,xs,ys)}L${xs(hi)},${ys(0)}L${xs(lo)},${ys(0)}Z" fill="var(--bayes-soft)"/><path d="${P(post,xs,ys)}" fill="none" stroke="var(--bayes)" stroke-width="2.5"/>`;
+      s+=`<line x1="${xs(0)}" x2="${xs(0)}" y1="${m.t}" y2="${m.t+ih}" class="zero"/>`;
+      return s;
+    },
+    over:({xs,m,ih,iw})=>{
+      let s=`<line x1="${m.l}" x2="${m.l+iw}" y1="${m.t+ih}" y2="${m.t+ih}" stroke="var(--muted)"/>`;
+      const tx=xs(S.lift/100);
+      if(tx>=m.l&&tx<=m.l+iw)s+=`<line x1="${tx}" x2="${tx}" y1="${m.t}" y2="${m.t+ih}" stroke="var(--ink)" stroke-width="1" stroke-dasharray="1 3"/><text x="${tx+4}" y="${m.t+10}" class="lab" style="fill:var(--ink)">truth ${pct(S.lift/100,1)}</text>`;
+      const cl=v=>Math.max(m.l,Math.min(m.l+iw,xs(v)));
+      const row=(y,l,h,c,lab,dash,mid)=>`<text x="${m.l-6}" y="${y+4}" text-anchor="end" style="fill:${c}" class="lab">${lab}</text><line x1="${cl(l)}" x2="${cl(h)}" y1="${y}" y2="${y}" stroke="${c}" stroke-width="3" ${dash?'stroke-dasharray="6 4"':''} stroke-linecap="round"/><circle cx="${cl(mid)}" cy="${y}" r="4.5" fill="${c}"/>`;
+      let y=m.t+ih+36;
+      s+=row(y,a.ci[0],a.ci[1],'var(--freq)','CI',false,a.rel);y+=16;
+      if(showSeq){s+=row(y,a.sci[0],a.sci[1],'var(--freq)','Seq',true,a.rel);} else s+=`<text x="${m.l-6}" y="${y+4}" text-anchor="end" class="lab" style="fill:var(--freq)">Seq</text><text x="${m.l+4}" y="${y+4}">${S.seq?'final read: sequential = fixed CI':'sequential testing off'}</text>`;
+      y+=16;s+=row(y,a.cred[0],a.cred[1],'var(--bayes)','CrI',false,a.pm);
+      return s;
+    }});
+  const shift=a.pm-a.rel;
+  $('distNote').innerHTML=S.priorOn
+    ?`The data alone say <b class="f">${pct(a.rel)}</b> ± ${pctu(a.se,2)}. Your prior N(${pct(p0,1)}, ${S.priorSd.toFixed(2)}%) carries <b>${(a.w*100).toFixed(0)}%</b> of the total precision, which moves the estimate by ${pct(shift)} to <b class="b">${pct(a.pm)}</b> and narrows the interval by ${((1-a.psd/a.se)*100).toFixed(0)}%. ${a.w>0.5?'The prior outweighs the data here; whoever reads this result needs to trust the prior.':a.w<0.1?'The data dominate, so both methods tell nearly the same story.':''}`
+    :`With the flat prior N(0, ∞), the posterior is the likelihood: the credible interval equals the confidence interval and chance to beat is ${(a.ctb*100).toFixed(1)}% = 1 − p/2${a.rel<0?' measured in the other direction':''}. Turn on a prior to see the curves separate.`;
+}
+
+function drawShrink(a){
+  const el=$('shrinkChart');const p0=S.priorMean/100;const za=invNorm(1-S.alpha/2);
+  const pts=[];for(let i=0;i<=120;i++){const s=Math.pow(10,Math.log10(0.0005)+i/120*(Math.log10(0.5)-Math.log10(0.0005)));const prec=1/(s*s)+1/(a.se*a.se);const m=(p0/(s*s)+a.rel/(a.se*a.se))/prec;const sd=Math.sqrt(1/prec);pts.push([s,m-za*sd,m+za*sd,m]);}
+  let lo=Math.min(...pts.map(p=>p[1]),p0,a.rel,0),hi=Math.max(...pts.map(p=>p[2]),p0,a.rel,0);const pad=(hi-lo)*.06;lo-=pad;hi+=pad;
+  svgChart(el,{label:'Posterior mean against prior standard error',h:250,x0:0.0005,x1:0.5,xlog:true,y0:lo,y1:hi,xticks:[0.001,0.003,0.01,0.03,0.1,0.3],xfmt:v=>(v*100)+'%',yticks:nice(lo,hi,5),yfmt:v=>pct(v,1),mb:42,
+    draw:({xs,ys,m,ih,iw})=>{
+      let s=`<path d="${band(pts,xs,ys)}" fill="var(--bayes-soft)"/>`;
+      s+=`<line x1="${m.l}" x2="${m.l+iw}" y1="${ys(a.rel)}" y2="${ys(a.rel)}" stroke="var(--freq)" stroke-width="2" stroke-dasharray="5 4"/>`;
+      s+=`<line x1="${m.l}" x2="${m.l+iw}" y1="${ys(p0)}" y2="${ys(p0)}" stroke="var(--prior)" stroke-width="2" stroke-dasharray="5 4"/>`;
+      s+=`<path d="${P(pts.map(p=>[p[0],p[3]]),xs,ys)}" fill="none" stroke="var(--bayes)" stroke-width="2.5"/>`;
+      const sx=xs(a.se);s+=`<line x1="${sx}" x2="${sx}" y1="${m.t}" y2="${m.t+ih}" class="zero"/>`;
+      if(S.priorOn){const cx=xs(S.priorSd/100);const prec=1/(S.priorSd/100)**2+1/a.se**2;const cm=(p0/(S.priorSd/100)**2+a.rel/a.se**2)/prec;s+=`<line x1="${cx}" x2="${cx}" y1="${m.t}" y2="${m.t+ih}" stroke="var(--prior)" stroke-width="1.5"/><circle cx="${cx}" cy="${ys(cm)}" r="5" fill="var(--bayes)" stroke="var(--surface)" stroke-width="2"/>`;}
+      return s;
+    },
+    over:({xs,m,ih})=>{const sx=xs(a.se);let s=`<text x="${sx}" y="${m.t+ih+32}" text-anchor="middle" class="lab">prior as precise as the data</text>`;if(S.priorOn)s+=`<text x="${xs(S.priorSd/100)+5}" y="${m.t+11}" class="lab" style="fill:var(--prior)">your prior</text>`;return s;}});
+}
+
+function drawTime(){
+  const pts=path.filter(p=>p.a);if(pts.length<2){['tChart','pChart','cChart'].forEach(i=>$(i).innerHTML='');$('peekNote').textContent='';return;}
+  const T=TL.T,d0=pts[0].d;
+  const cut=pts.slice(Math.floor(pts.length*0.2));
+  let lo=Math.min(...cut.map(p=>p.a.ci[0]),S.lift/100,0),hi=Math.max(...cut.map(p=>p.a.ci[1]),S.lift/100,0);const pad=(hi-lo)*.15;lo-=pad;hi+=pad;
+  const xt=nice(1,T,5).filter(v=>v>=1&&Number.isInteger(v));
+  svgChart($('tChart'),{label:'Lift estimate over time',h:230,x0:1,x1:T,y0:lo,y1:hi,xticks:xt,xfmt:v=>'d'+v,yticks:nice(lo,hi,5),yfmt:v=>pct(v,1),
+    draw:({xs,ys,m,iw})=>{
+      let s=`<path d="${band(pts.map(p=>[p.d,p.a.ci[0],p.a.ci[1]]),xs,ys)}" fill="var(--freq-soft)"/>`;
+      s+=`<line x1="${m.l}" x2="${m.l+iw}" y1="${ys(0)}" y2="${ys(0)}" class="zero"/>`;
+      s+=`<line x1="${m.l}" x2="${m.l+iw}" y1="${ys(S.lift/100)}" y2="${ys(S.lift/100)}" stroke="var(--ink)" stroke-dasharray="1 3"/>`;
+      if(S.seq){s+=`<path d="${P(pts.map(p=>[p.d,p.a.sci[0]]),xs,ys)}" fill="none" stroke="var(--freq)" stroke-dasharray="4 3" stroke-width="1.5"/><path d="${P(pts.map(p=>[p.d,p.a.sci[1]]),xs,ys)}" fill="none" stroke="var(--freq)" stroke-dasharray="4 3" stroke-width="1.5"/>`;}
+      s+=`<path d="${P(pts.map(p=>[p.d,p.a.cred[0]]),xs,ys)}" fill="none" stroke="var(--bayes)" stroke-width="1.2" opacity=".8"/><path d="${P(pts.map(p=>[p.d,p.a.cred[1]]),xs,ys)}" fill="none" stroke="var(--bayes)" stroke-width="1.2" opacity=".8"/>`;
+      s+=`<path d="${P(pts.map(p=>[p.d,p.a.rel]),xs,ys)}" fill="none" stroke="var(--freq)" stroke-width="2.2"/>`;
+      s+=`<path d="${P(pts.map(p=>[p.d,p.a.pm]),xs,ys)}" fill="none" stroke="var(--bayes)" stroke-width="2.2"/>`;
+      return s;
+    }});
+  const pmin=1e-4;
+  let firstSig=pts.find(p=>p.a.p<S.alpha), firstSeq=pts.find(p=>(S.seq&&p.d!==T?p.a.ps:p.a.p)<S.alpha);
+  svgChart($('pChart'),{label:'p-value over time',h:230,x0:1,x1:T,y0:pmin,y1:1,ylog:true,xticks:xt,xfmt:v=>'d'+v,yticks:[1e-4,1e-3,0.01,0.1,1],yfmt:v=>String(v),ml:50,
+    draw:({xs,ys,m,iw})=>{
+      let s=`<line x1="${m.l}" x2="${m.l+iw}" y1="${ys(S.alpha)}" y2="${ys(S.alpha)}" stroke="var(--bad)" stroke-width="1.5" stroke-dasharray="5 3"/>`;
+      if(S.seq)s+=`<path d="${P(pts.map(p=>[p.d,Math.max(pmin,p.d===T?p.a.p:p.a.ps)]),xs,ys)}" fill="none" stroke="var(--freq)" stroke-width="1.8" stroke-dasharray="4 3"/>`;
+      s+=`<path d="${P(pts.map(p=>[p.d,Math.max(pmin,p.a.p)]),xs,ys)}" fill="none" stroke="var(--freq)" stroke-width="2.2"/>`;
+      if(firstSig)s+=`<circle cx="${xs(firstSig.d)}" cy="${ys(Math.max(pmin,firstSig.a.p))}" r="5" fill="var(--bad)" stroke="var(--surface)" stroke-width="2"/>`;
+      return s;
+    }});
+  const t=S.thr/100;
+  svgChart($('cChart'),{label:'Chance to beat over time',h:230,x0:1,x1:T,y0:0,y1:1,xticks:xt,xfmt:v=>'d'+v,yticks:[0,.25,.5,.75,1],yfmt:v=>(v*100)+'%',
+    draw:({xs,ys,m,iw})=>{
+      let s=`<line x1="${m.l}" x2="${m.l+iw}" y1="${ys(t)}" y2="${ys(t)}" stroke="var(--good)" stroke-dasharray="5 3"/><line x1="${m.l}" x2="${m.l+iw}" y1="${ys(1-t)}" y2="${ys(1-t)}" stroke="var(--bad)" stroke-dasharray="5 3"/>`;
+      s+=`<path d="${P(pts.map(p=>[p.d,p.a.ctb]),xs,ys)}" fill="none" stroke="var(--bayes)" stroke-width="2.4"/>`;
+      return s;
+    }});
+  const fin=pts[pts.length-1].a;
+  let msg='';
+  if(firstSig&&fin.p>=S.alpha)msg=`<b>Peeking trap in this run:</b> the plain p-value first dropped below α on day ${firstSig.d} (red dot), but the final read on day ${T} is not significant (p = ${fmtP(fin.p)}). Stopping on day ${firstSig.d} would have reported ${pct(firstSig.a.rel)}. `;
+  else if(firstSig)msg=`The plain p-value first crossed α on day ${firstSig.d} and the final read agrees. `;
+  else msg=`The p-value never crossed α during this run. `;
+  if(S.seq)msg+=firstSeq?`With sequential testing, the first valid early call came on day ${firstSeq.d}.`:`Sequential testing never made an early call, so it protected you from any false start.`;
+  else msg+=`Turn on sequential testing to see the wider early intervals that make daily looks safe.`;
+  if(M.lag)msg+=` Retention reads start on day ${d0}: before then, no exposed user has finished the ${S.retW}-day window.`;
+  $('peekNote').innerHTML=msg;
+}
+
+// ---------- monte carlo ----------
+let mcTimer=null;
+function scheduleMC(){clearTimeout(mcTimer);$('mcMeta').textContent='Running…';mcTimer=setTimeout(runMC,220);}
+function runMC(){
+  const R=2000, M0=model(), TLx=timeline(M0);
+  if(TLx.Nfinal<=0){$('mcTable').innerHTML='';$('mcMeta').textContent='No analysable users with these settings.';return;}
+  const za=invNorm(1-S.alpha/2), t=S.thr/100, a=S.alpha;
+  const p0=S.priorMean/100,s0=S.priorSd/100;
+  const scen=(lift,seed)=>{
+    const L=lift/100, Mx={...M0};
+    Mx.mt=M0.mc*(1+L);
+    if(S.metric==='conversion'||S.metric==='retention'){Mx.vt=Mx.mt*(1-Mx.mt)*M0.red;}else{Mx.vt=(M0.cv*Mx.mt)**2*M0.red;}
+    const r=mulberry32(seed);const res=[...Array(6)].map(()=>({calls:0,right:0,days:[],est:[]}));
+    const rec=(k,dir,day,est)=>{const o=res[k];o.calls++;const ok=L===0?false:(dir===Math.sign(L));if(ok){o.right++;o.est.push(est);}o.days.push(day);};
+    for(let i=0;i<R;i++){
+      let n=0,sc=0,st=0,done=[false,false,false,false,false,false];
+      for(let d=1;d<=TLx.T;d++){
+        const k=d-M0.lag,inc=(k>=1&&k<=TLx.D)?TLx.upd:0;
+        if(inc>0){n+=inc;sc+=inc*Mx.mc+Math.sqrt(inc*Mx.vc)*gauss(r);st+=inc*Mx.mt+Math.sqrt(inc*Mx.vt)*gauss(r);}
+        if(!(n>0))continue;const mc=sc/n,mt=st/n;if(mc<=0)continue;
+        const rel=mt/mc-1,se=Math.sqrt(Mx.vt/(n*mc*mc)+mt*mt*Mx.vc/(n*mc**4)),z=rel/se,p=2*Phi(-Math.abs(z));
+        const fin=d===TLx.T, dir=Math.sign(rel);
+        if(!done[1]&&p<a){done[1]=true;rec(1,dir,d,rel);}
+        if(!done[2]){let ps=p;if(!fin){const zs=seqZ(n,Mx,TLx.Nfinal,za,a);ps=2*Phi(-Math.abs(z)/(zs/za));}if(ps<a){done[2]=true;rec(2,dir,d,rel);}}
+        const ctb=Phi(z);
+        if(!done[4]&&(ctb>=t||ctb<=1-t)){done[4]=true;rec(4,ctb>=t?1:-1,d,rel);}
+        if(fin){
+          if(p<a)rec(0,dir,d,rel);
+          if(ctb>=t||ctb<=1-t)rec(3,ctb>=t?1:-1,d,rel);
+          let pm=rel,psd=se;if(S.priorOn){const prec=1/(s0*s0)+1/(se*se);pm=(p0/(s0*s0)+rel/(se*se))/prec;psd=Math.sqrt(1/prec);}
+          const c2=Phi(pm/psd);if(c2>=t||c2<=1-t)rec(5,c2>=t?1:-1,d,pm);
+        }
+      }
+    }
+    return res;
+  };
+  const aa=scen(0,S.seed*7919+1), ab=scen(S.lift,S.seed*7919+2);
+  const names=[
+    ['f','Fixed horizon','One look at the planned end'],
+    ['f','Peek daily, plain p-value','Stop at the first p < α'],
+    ['f','Peek daily, sequential','mSPRT-adjusted p*'],
+    ['b','Bayesian, flat prior','CtB ≥ '+S.thr+'% (or ≤ '+(100-S.thr).toFixed(1)+'%) at end'],
+    ['b','Bayesian, flat, peek daily','Stop at first threshold crossing'],
+    ['b','Bayesian, your prior',S.priorOn?`N(${pct(p0,1)}, ${S.priorSd.toFixed(2)}%) at end`:'Prior off: same as flat']
+  ];
+  const med=a=>{if(!a.length)return '—';const s=a.slice().sort((x,y)=>x-y);return 'd'+s[Math.floor(s.length/2)];};
+  const bar=(v,c,mark)=>`<div class="bar"><i style="width:${Math.min(100,v*100)}%;background:${c}"></i>${mark!=null?`<u style="left:${mark*100}%"></u>`:''}<span>${(v*100).toFixed(1)}%</span></div>`;
+  const L=S.lift/100;
+  let h=`<thead><tr><th>Procedure</th><th>A/A · any call (false)</th><th>${L===0?'A/B · same as A/A':'A/B · right call at '+pct(L,1)}</th><th>Median call day</th><th>Reported ÷ true lift</th></tr></thead><tbody>`;
+  names.forEach((nm,k)=>{
+    const fa=aa[k].calls/R, pw=ab[k].right/R;
+    const ex=(L!==0&&ab[k].est.length)?(ab[k].est.reduce((x,y)=>x+y,0)/ab[k].est.length/L):null;
+    const exTxt=ex==null?'—':ex.toFixed(2)+'×';
+    const exCol=ex!=null&&ex>1.25?'var(--warn)':'inherit';
+    h+=`<tr><td class="m"><span class="tag ${nm[0]}">${nm[0]==='f'?'Freq':'Bayes'}</span> <b style="display:inline">${nm[1]}</b><small style="display:block">${nm[2]}</small></td>
+      <td>${bar(fa,'var(--bad-soft)',S.alpha)}</td><td>${L===0?'<span style="color:var(--muted)">—</span>':bar(pw,nm[0]==='f'?'var(--freq-soft)':'var(--bayes-soft)')}</td>
+      <td class="num">${med(L===0?aa[k].days:ab[k].days)}</td><td class="num" style="color:${exCol}">${exTxt}</td></tr>`;
+  });
+  h+='</tbody>';
+  $('mcTable').innerHTML=h;
+  $('mcMeta').textContent=`2 × ${R.toLocaleString()} simulated experiments · ${fmtN(S.users)} users/group · ${TLx.T} days · α = ${S.alpha}`;
+}
+
+// ---------- engine notes ----------
+function renderEngine(){
+  const Mm=model();const el=$('engine');const za=invNorm(1-S.alpha/2);
+  const names={conversion:'Conversion (event_user)',revenue:'Revenue per user (sum)',retention:'Retention (ratio)',ratio:'Clicks per session (ratio)'};
+  $('engEyebrow').textContent=names[S.metric];
+  let metricBox='';
+  if(S.metric==='conversion'){
+    metricBox=`<div class="box"><h3>Unit-level 0/1 flag</h3><p>Each exposed user gets 1 if they fired the event at any point after exposure, else 0. The group mean is the share of exposed users who converted. Only post-exposure events count.</p>
+    <div class="fx">X̄ = Σ flagᵢ / N_exposed
+var(X) = p(1 − p) = ${(Mm.rawVc).toFixed(4)}
+SE(Δ%) ≈ √( var_t/(N·X̄c²) + X̄t²·var_c/(N·X̄c⁴) )</div></div>`;
+  }else if(S.metric==='revenue'){
+    metricBox=`<div class="box"><h3>Sum per user, zeros imputed</h3><p>Revenue is summed per user across their enrolled days, then averaged per group, with 0 imputed for exposed users who spent nothing. Revenue is heavy-tailed: a handful of whales dominate the variance.</p>
+    <div class="fx">X̄ = Σ revenueᵢ / N_exposed   (non-buyers = 0)
+coefficient of variation: ${S.winsor?'3.0 (winsorized)':'8.0 (raw)'}
+winsorize: values above P99.9 → P99.9
+variance cut by winsorizing ≈ ${(1-(3*0.93)**2/64).toLocaleString(undefined,{style:'percent'})}</div><ul><li>Winsorizing trades a slightly biased mean (capped whales) for a much smaller standard error. Toggle it and watch the CI shrink.</li></ul></div>`;
+  }else if(S.metric==='retention'){
+    const lo=Math.max(1,S.retW-S.retL+1);
+    metricBox=`<div class="box"><h3>Rolling retention as a ratio metric</h3><p>Retention has a period end (day ${S.retW}) and a lookback window (${S.retL} day${S.retL>1?'s':''}). A user counts as retained if they fire the completion event between day ${lo} and day ${S.retW} after exposure. Only users whose window has fully completed enter the denominator, so users exposed in the last ${S.retW} days are excluded unless cohorts are allowed to mature after the experiment ends.</p>
+    <div class="fx">numerator   = Σ 1[event in days ${lo}…${S.retW}]
+denominator = Σ 1[window completed]
+retention   = Σ numerator / Σ denominator
+eligible now: ${fmtN(timeline(Mm).Nfinal)} of ${fmtN(S.users)} users/group</div><ul><li>Statsig treats retention as a ratio metric in Pulse, so variance comes from the delta method.</li><li>${S.mature?'Maturing on: the read waits '+S.retW+' extra days so every exposed user counts.':'Maturing off: '+Math.round((1-timeline(Mm).Nfinal/S.users)*100)+'% of exposed users are not yet measurable, which widens every interval.'}</li></ul></div>`;
+  }else{
+    const sx=1.9,sy=2.6,rho=0.75,my=3.2,R=S.base.ratio*1;const sxy=rho*sx*sy;
+    const vd=(sx*sx-2*R*sxy+R*R*sy*sy)/(my*my), vn=(sx*sx+R*R*sy*sy)/(my*my);
+    metricBox=`<div class="box"><h3>Delta method for ratio metrics</h3><p>Clicks and sessions come from the same users, so numerator and denominator are correlated. Treating each session as an independent unit, or ignoring the covariance, gives the wrong standard error. The delta method accounts for it.</p>
+    <div class="fx">R̄ = X̄ / Ȳ     (clicks / sessions, per group)
+var(R̄) ≈ (1/Ȳ²)·[ var(X̄) − 2R̄·cov(X̄,Ȳ) + R̄²·var(Ȳ) ]
+example user-level σx=${sx}, σy=${sy}, ρ=${rho}, Ȳ=${my}
+  with covariance:    ${vd.toFixed(3)}
+  ignoring covariance: ${vn.toFixed(3)}</div><ul><li>With positively correlated numerator and denominator, ignoring covariance here would inflate the variance ${(vn/vd).toFixed(1)}×.</li></ul></div>`;
+  }
+  const red=S.rho*S.rho;
+  el.innerHTML=metricBox+`
+  <div class="box"><h3>Variance reduction</h3><p>CUPED regresses out each user's own pre-exposure behaviour. Statsig uses the 7 days before each user's exposure, and stratifies users with no history.</p>
+    <div class="fx">Y_cuped = Y − θ(X_pre − X̄_pre),  θ = cov(Y,X)/var(X)
+var(Y_cuped) = var(Y)·(1 − ρ²)
+ρ = ${S.rho.toFixed(2)} → ${(red*100).toFixed(0)}% less variance ≈ ${(1/(1-red)).toFixed(2)}× the sample size</div><ul><li>${S.cuped?'CUPED is on in this simulation.':'CUPED is off; turn it on to see the intervals tighten.'}</li></ul></div>
+  <div class="box"><h3>Frequentist: z-test and mSPRT</h3><p>The relative delta is (X̄t − X̄c)/X̄c with a delta-method standard error. Sequential testing replaces the critical value with Z*, which starts large and approaches the fixed value as data accumulate. Statsig applies the adjustment only before the planned end.</p>
+    <div class="fx">CI  = Δ ± ${za.toFixed(3)}·SE        p = 2Φ(−|Z|)
+V   = var(Xt)/Nt + var(Xc)/Nc
+τ   = Z²α/2 · (var(Xt)+var(Xc)) / (Nt+Nc)
+Z*  = √( (V+τ)/τ · (−2 ln(α/2) − ln(V/(V+τ))) )
+p*  = 2Φ(−|Z| / σ),   σ = Z* / Zα/2</div></div>
+  <div class="box"><h3>Bayesian: normal–normal update</h3><p>Statsig puts the prior on the relative average treatment effect and combines it with the observed effect by precision weighting. Without a prior it uses N(0, ∞), so the posterior equals the observed distribution.</p>
+    <div class="fx">ATE_post = (ATE_prior/STE²_prior + ATE_obs/STE²_obs)
+           / (1/STE²_prior + 1/STE²_obs)
+STE²_post = 1 / (1/STE²_prior + 1/STE²_obs)
+Chance to beat = P(Δ > 0) = Φ(μ/σ)
+Expected loss  = E[Δ | Δ<0]·P(Δ<0)</div><ul><li>A common recipe: prior mean = average effect of similar past experiments; prior SE = their standard deviation or average SE.</li></ul></div>`;
+}
+
+// ---------- controls ----------
+function sync(){
+  document.querySelectorAll('#metricSeg button').forEach(b=>b.setAttribute('aria-pressed',b.dataset.metric===S.metric));
+  document.querySelectorAll('#alphaSeg button').forEach(b=>b.setAttribute('aria-pressed',+b.dataset.alpha===S.alpha));
+  const B=BASES[S.metric],base=$('base');base.min=B.min;base.max=B.max;base.step=B.step;base.value=S.base[S.metric];
+  $('baseLbl').textContent={conversion:'Control conversion rate',revenue:'Control revenue / user',retention:'Control retention rate',ratio:'Control clicks / session'}[S.metric];
+  const bv=S.base[S.metric];$('baseOut').textContent=S.metric==='revenue'?'$'+bv.toFixed(2):S.metric==='ratio'?bv.toFixed(2):bv+'%';
+  $('lift').value=S.lift;$('liftOut').textContent=pct(S.lift/100,1);
+  $('users').value=vFromUsers(S.users);$('usersOut').textContent=fmtN(S.users);
+  $('days').value=S.days;$('daysOut').textContent=S.days+' days';
+  $('retGroup').hidden=S.metric!=='retention';
+  $('retW').value=S.retW;$('retWOut').textContent='day '+S.retW;
+  S.retL=Math.min(S.retL,S.retW);$('retL').max=Math.min(7,S.retW);$('retL').value=S.retL;$('retLOut').textContent=S.retL+(S.retL>1?' days':' day');
+  $('retWinTxt').textContent=`Retained = active on day ${Math.max(1,S.retW-S.retL+1)}–${S.retW} after exposure.`;
+  $('mature').checked=S.mature;
+  $('cuped').checked=S.cuped;$('rho').value=S.rho;$('rhoOut').textContent=S.rho.toFixed(2);
+  $('rhoCtl').classList.toggle('dim',!S.cuped);$('rhoTxt').textContent=`Cuts variance by ${(S.rho*S.rho*100).toFixed(0)}%.`;
+  $('winsorRow').hidden=S.metric!=='revenue';$('winsor').checked=S.winsor;
+  $('seq').checked=S.seq;
+  $('priorOn').checked=S.priorOn;$('priorCtls').classList.toggle('dim',!S.priorOn);$('flatTxt').hidden=S.priorOn;
+  $('priorMean').value=S.priorMean;$('priorMeanOut').textContent=pct(S.priorMean/100,1);
+  $('priorSd').value=vFromSd(S.priorSd);$('priorSdOut').textContent=S.priorSd.toFixed(2)+'%';
+  document.querySelectorAll('[data-prior]').forEach(b=>{const d=b.dataset.prior;let on;if(d==='default')on=!S.priorOn;else{const [m,sd]=d.split(',').map(Number);on=S.priorOn&&S.priorMean===m&&S.priorSd===sd;}b.setAttribute('aria-pressed',on);});
+  $('thr').value=S.thr;$('thrOut').textContent=S.thr+'%';
+  $('tol').value=S.tol;$('tolOut').textContent=S.tol.toFixed(2)+'%';
+}
+function set(p){if(!('readDay' in p))S.readDay=null;Object.assign(S,p);document.querySelectorAll('.presets .chip').forEach(c=>c.setAttribute('aria-pressed','false'));sync();render();}
+document.querySelectorAll('#metricSeg button').forEach(b=>b.onclick=()=>set({metric:b.dataset.metric}));
+document.querySelectorAll('#alphaSeg button').forEach(b=>b.onclick=()=>set({alpha:+b.dataset.alpha}));
+const on=(id,fn,ev='input')=>$(id).addEventListener(ev,e=>set(fn(e.target)));
+on('base',t=>{const b={...S.base};b[S.metric]=+t.value;return {base:b};});
+on('lift',t=>({lift:+t.value}));
+on('users',t=>({users:usersFromV(+t.value)}));
+on('days',t=>({days:+t.value}));
+on('retW',t=>({retW:+t.value}));
+on('retL',t=>({retL:+t.value}));
+on('mature',t=>({mature:t.checked}),'change');
+on('cuped',t=>({cuped:t.checked}),'change');
+on('rho',t=>({rho:+t.value}));
+on('winsor',t=>({winsor:t.checked}),'change');
+on('seq',t=>({seq:t.checked}),'change');
+on('priorOn',t=>({priorOn:t.checked}),'change');
+on('priorMean',t=>({priorMean:+t.value}));
+on('priorSd',t=>({priorSd:+sdFromV(+t.value).toFixed(2)}));
+on('thr',t=>({thr:+t.value}));
+on('tol',t=>({tol:+t.value}));
+document.querySelectorAll('[data-prior]').forEach(b=>b.onclick=()=>{if(b.dataset.prior==='default'){set({priorOn:false});return;}const [m,s]=b.dataset.prior.split(',').map(Number);set({priorOn:true,priorMean:m,priorSd:s});});
+$('readDay').addEventListener('input',e=>{S.readDay=+e.target.value;render(true);});
+$('rerun').onclick=()=>set({seed:Math.floor(Math.random()*1e6)});
+document.querySelectorAll('[data-preset]').forEach(c=>c.onclick=()=>{
+  const p=PRESETS[c.dataset.preset];S=JSON.parse(JSON.stringify(DEFAULT));Object.assign(S,p);
+  sync();render();document.querySelectorAll('.presets .chip').forEach(x=>x.setAttribute('aria-pressed',x===c?'true':'false'));
+});
+let rz;new ResizeObserver(()=>{clearTimeout(rz);rz=setTimeout(()=>{if(final){drawDist(final.a);drawShrink(final.a);drawTime();}},120);}).observe(document.querySelector('main'));
+const THEMES=['auto','light','dark'];
+const ICONS={
+  auto:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"/><path d="M12 3.5v17a8.5 8.5 0 0 0 0-17z" fill="currentColor"/></svg>',
+  light:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2M12 19.5v2M4.6 4.6l1.4 1.4M18 18l1.4 1.4M2.5 12h2M19.5 12h2M4.6 19.4L6 18M18 6l1.4-1.4"/></svg>',
+  dark:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg>'};
+const applyTheme=t=>{if(t==='auto')delete document.documentElement.dataset.theme;else document.documentElement.dataset.theme=t;const b=$('theme');b.innerHTML=ICONS[t];b.title=b.ariaLabel='Theme: '+t;};
+applyTheme(document.documentElement.dataset.theme||'auto');
+$('theme').onclick=()=>{const cur=document.documentElement.dataset.theme||'auto';const nx=THEMES[(THEMES.indexOf(cur)+1)%3];applyTheme(nx);try{nx==='auto'?localStorage.removeItem('theme'):localStorage.setItem('theme',nx);}catch(e){}};
+sync();render();
+document.querySelector('[data-preset="default"]').setAttribute('aria-pressed','true');
+})();
+</script>
+
+</body></html>
