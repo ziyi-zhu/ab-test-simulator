@@ -74,6 +74,9 @@ button,input{font:inherit;color:inherit}
 .chip{border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:6px 13px;font-size:13px;cursor:pointer;transition:border-color .15s,background .15s}
 .chip:hover{border-color:var(--muted)}
 .chip[aria-pressed="true"]{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+.pnote{position:relative;overflow:hidden;margin:0;padding:14px 18px 14px 22px;background:var(--surface);border:1px solid var(--line);border-radius:var(--r);font-size:14px;line-height:1.6;box-shadow:0 1px 2px rgba(16,24,40,.04)}
+.pnote::before{content:"";position:absolute;inset:0 auto 0 0;width:4px;background:var(--ink)}
+.pnote b{font-weight:600}.pnote em{font-style:italic;color:var(--ink)}
 
 .shell{display:grid;grid-template-columns:318px minmax(0,1fr);gap:20px;align-items:start}
 .panel{position:sticky;top:calc(env(safe-area-inset-top,0px) + 12px);max-height:calc(100vh - 24px);overflow:auto;background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:16px;display:flex;flex-direction:column;gap:18px}
@@ -314,6 +317,7 @@ footer ul{margin:0;padding-left:18px}
 </aside>
 
 <main>
+  <p class="pnote" id="presetNote" hidden></p>
   <div id="warn" class="warnline" hidden></div>
   <div class="strip" aria-label="Experiment snapshot">
     <div><div class="eyebrow">Control mean</div><div class="v" id="sC"></div></div>
@@ -438,7 +442,16 @@ const PRESETS={
   wish:{metric:'conversion',lift:-2,users:30000,days:14,priorOn:true,priorMean:3,priorSd:1,seq:false,seed:9},
   rev:{metric:'revenue',lift:5,users:100000,days:14,winsor:false,cuped:false,priorOn:false,seed:4},
   ret:{metric:'retention',lift:-3,users:60000,days:14,retW:7,retL:7,mature:false,priorOn:false,seed:12},
-  peek:{metric:'conversion',lift:0,users:100000,days:28,priorOn:false,seq:false,seed:44}
+  peek:{metric:'conversion',lift:0,users:100000,days:28,priorOn:false,seq:false,seed:178}
+};
+const PRESET_NOTES={
+  aa:'<b>A/A test.</b> Both groups are identical (true lift 0%), so <em>any</em> call is a false positive. This run lands where it should: <b>not significant</b> and <b>inconclusive</b>, with the interval straddling zero. The Monte Carlo table shows the base rates. One look at the end makes a false call about <b>5%</b> of the time, which is α. Stopping at the first p &lt; α on daily peeks pushes that past <b>20%</b>. The 95% chance-to-beat rule fires about 10% of the time, because it can trigger in either direction.',
+  clear:'<b>Clear win.</b> A real +4% lift with 200k users per group. Both methods say <b>Ship it</b>, and the p-value drops below α within the first couple of days. The skeptical prior N(0, 2%) pulls the Bayesian estimate back towards zero (about +4.3% observed becomes <b>+3.5%</b>). That is why the <em>your prior</em> row in the Monte Carlo table under-reports the true lift, while the fixed-horizon test is unbiased.',
+  under:'<b>Underpowered.</b> A true +2% lift with only 20k users per group, so the standard error (about 2.9%) is larger than the effect. Neither method can call it, and power is <b>under 10%</b>. Check the <em>Reported ÷ true lift</em> column: the few runs that do reach significance report roughly <b>4×</b> the real effect (the <em>winner’s curse</em>). The tight 1% prior carries almost 90% of the weight, so the Bayesian answer mostly restates the prior.',
+  wish:'<b>Wishful prior.</b> The change actually <b>hurts (−2%)</b>, but the prior is confident it helps, N(+3%, 1%), and 30k users are too few for the data to argue back. The frequentist test says <b>not significant</b>, while the Bayesian side says <b>Ship it</b> because the prior carries most of the weight. In the Monte Carlo table, the <em>your prior</em> row ships nearly every A/A test and never flags the regression: a confident, wrong prior decides the outcome on its own.',
+  rev:'<b>Revenue outliers.</b> Revenue per user is heavy-tailed, so a few big spenders dominate the variance. This run ships, but the interval runs from about <b>+3% to +19%</b> around a true +5%, and the Monte Carlo shows only about <b>23% power</b> with wins inflated roughly 2×. Turn on <em>Winsorize at p99.9</em> to cap the outliers and watch the interval tighten.',
+  ret:'<b>Retention trap.</b> D7 retention with a real −3% drop. Nothing can be read until <b>day 8</b>, because no one has finished a 7-day window before then, so the daily charts start late. With <em>Let cohorts mature</em> off, the final read only counts users exposed in the first 7 days, <b>about half the sample</b>. The drop is still caught here; turn maturing on to count everyone and gain power.',
+  peek:'<b>Peeking temptation.</b> No true effect, run for 28 days and checked daily. In this run the plain p-value dips below α on <b>day 4</b> (red dot in the p-value chart). Stopping there would have reported a −6.9% change that does not exist, yet the final read on day 28 is nowhere near significant. Across the Monte Carlo runs, daily peeking makes a false call in <b>about a quarter</b> of A/A tests. Turn on <em>Sequential testing (mSPRT)</em> to bring that back to α.'
 };
 
 const $=id=>document.getElementById(id);
@@ -858,7 +871,7 @@ function sync(){
   $('thr').value=S.thr;$('thrOut').textContent=S.thr+'%';
   $('tol').value=S.tol;$('tolOut').textContent=S.tol.toFixed(2)+'%';
 }
-function set(p){if(!('readDay' in p))S.readDay=null;Object.assign(S,p);document.querySelectorAll('.presets .chip').forEach(c=>c.setAttribute('aria-pressed','false'));sync();render();}
+function set(p){$('presetNote').hidden=true;if(!('readDay' in p))S.readDay=null;Object.assign(S,p);document.querySelectorAll('.presets .chip').forEach(c=>c.setAttribute('aria-pressed','false'));sync();render();}
 document.querySelectorAll('#metricSeg button').forEach(b=>b.onclick=()=>set({metric:b.dataset.metric}));
 document.querySelectorAll('#alphaSeg button').forEach(b=>b.onclick=()=>set({alpha:+b.dataset.alpha}));
 const on=(id,fn,ev='input')=>$(id).addEventListener(ev,e=>set(fn(e.target)));
@@ -884,6 +897,7 @@ $('rerun').onclick=()=>set({seed:Math.floor(Math.random()*1e6)});
 document.querySelectorAll('[data-preset]').forEach(c=>c.onclick=()=>{
   const p=PRESETS[c.dataset.preset];S=JSON.parse(JSON.stringify(DEFAULT));Object.assign(S,p);
   sync();render();document.querySelectorAll('.presets .chip').forEach(x=>x.setAttribute('aria-pressed',x===c?'true':'false'));
+  const note=PRESET_NOTES[c.dataset.preset];$('presetNote').innerHTML=note||'';$('presetNote').hidden=!note;
 });
 let rz;new ResizeObserver(()=>{clearTimeout(rz);rz=setTimeout(()=>{if(final){drawDist(final.a);drawShrink(final.a);drawTime();}},120);}).observe(document.querySelector('main'));
 const THEMES=['auto','light','dark'];
